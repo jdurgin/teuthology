@@ -391,3 +391,6 @@ def task(ctx, config):
     (err, out) = rgwadmin(ctx, client, ['user', 'rm', '--uid', user])
     assert err
 
+    # TESTCASE 'rm-bucket-objects', 'bucket', 'rm', 'bucket with objects', 'succeeds'
+    (err, out) = rgwadmin(ctx, client, ['bucket', 'rm', '--bucket', bucket.name, '--purge-objects']
+    assert not err
