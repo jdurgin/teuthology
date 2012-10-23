@@ -391,21 +391,3 @@ def task(ctx, config):
     (err, out) = rgwadmin(ctx, client, ['user', 'rm', '--uid', user])
     assert err
 
-    # delete should fail
-    fails = False
-    try:
-        bucket.delete()
-    except:
-        fails = True
-    assert fails
-
-    key.delete()
-    bucket.delete()
-    
-    # TESTCASE 'rm-user','user','rm','existing user','fails, still has buckets'
-    (err, out) = rgwadmin(ctx, client, ['user', 'rm', '--uid', user])
-    assert not err
-
-    # TESTCASE 'rm-user2','user','rm','deleted user','fails'
-    (err, out) = rgwadmin(ctx, client, ['user', 'info', '--uid', user])
-    assert err
