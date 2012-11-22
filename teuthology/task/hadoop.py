@@ -29,11 +29,14 @@ def hello_world(ctx, config, name_):
 		log.info('in hello.finally')
 
 def set_java_home():
-    os.environ['JAVA_HOME'] = '/usr/lib/jvm/java-6-openjdk'
+    os.environ['JAVA_HOME'] = '/usr/lib/jvm/java-6-openjdk-amd64'
 
 def edit_hadoop_env():
     with open("/tmp/cephtest/hadoop/conf/hadoop-env.sh", "a") as fileToWrite:
-        fileToWrite.write("export JAVA_HOME=/usr/lib/jvm/java-6-openjdk")
+        fileToWrite.write("export JAVA_HOME=/usr/lib/jvm/java-6-openjdk-amd64\n")
+        fileToWrite.write("export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/tmp/cephtest/binary/usr/local/lib:/usr/lib\n")
+        fileToWrite.write("export HADOOP_CLASSPATH=$HADOOP_CLASSPATH:/tmp/cephtest/binary/usr/local/lib/libcephfs.jar\n")
+        fileToWrite.close()
 
 def write_core_site():
     with open("/tmp/cephtest/hadoop/conf/core-site.xml", "w") as fileToWrite:
@@ -47,7 +50,11 @@ def write_core_site():
         fileToWrite.write("\t</property>\n")
         fileToWrite.write("\t<property>\n")
         fileToWrite.write("\t\t<name>fs.default.name</name>\n")
-        fileToWrite.write("\t\t<value>hdfs://localhost:54310</value>\n")
+        fileToWrite.write("\t\t<value>ceph:///</value>\n")
+        fileToWrite.write("\t</property>\n")
+        fileToWrite.write("\t<property>\n")
+        fileToWrite.write("\t\t<name>fs.ceph.conf.file</name>\n")
+        fileToWrite.write("\t\t<value>/tmp/cephtest/ceph.conf</value>\n")
         fileToWrite.write("\t</property>\n")
         fileToWrite.write("</configuration>\n")
         fileToWrite.close()
@@ -61,7 +68,7 @@ def write_mapred_site():
         fileToWrite.write("<configuration>\n")
         fileToWrite.write("\t<property>\n")
         fileToWrite.write("\t\t<name>mapred.job.tracker</name>\n")
-        fileToWrite.write("\t\t<value>localhost:54311</value>\n")
+        fileToWrite.write("\t\t<value>192.168.141.130:54311</value>\n")
         fileToWrite.write("\t</property>\n")
         fileToWrite.write("</configuration>\n")
         fileToWrite.close()
@@ -81,6 +88,17 @@ def write_hdfs_site():
         fileToWrite.close()
         log.info("wrote file: /tmp/cephtest/hadoop/conf/hdfs-site.xml")
 
+def write_slaves():
+    with open("/tmp/cephtest/hadoop/conf/slaves", "w") as fileToWrite:
+        fileToWrite.write("192.168.141.130\n")
+        fileToWrite.close()
+        log.info("wrote file: /tmp/cephtest/hadoop/conf/slaves")
+
+def write_master():
+    with open("/tmp/cephtest/hadoop/conf/masters", "w") as fileToWrite:
+        fileToWrite.write("192.168.141.130\n")
+        fileToWrite.close()
+        log.info("wrote file: /tmp/cephtest/hadoop/conf/masters")
 
 @contextlib.contextmanager
 def configure_hadoop2(ctx, config):
@@ -134,7 +152,7 @@ def load_data(ctx, config):
     time.sleep(30)
     log.info('loading wordcount data')
     subprocess.call(["/tmp/cephtest/hadoop/bin/hadoop", "dfs", "-mkdir", "wordcount_input"])
-    for myFile in glob.glob("/tmp/wordcount_input/*"):
+    for myFile in glob.glob("/users/buck/hadoop_wordcount_input/*"):
         subprocess.call(["/tmp/cephtest/hadoop/bin/hadoop", "dfs", "-put",\
         myFile, "./wordcount_input" ])
 
@@ -149,7 +167,7 @@ def load_data(ctx, config):
 @contextlib.contextmanager
 def start_hadoop(ctx, config):
     log.info('starting hadoop up')
-    subprocess.call(["/tmp/cephtest/hadoop/bin/start-all.sh"])
+    subprocess.call(["/tmp/cephtest/hadoop/bin/start-mapred.sh"])
     log.info('done starting hadoop up')
 
     try: 
