@@ -127,6 +127,9 @@ def main():
         with file(os.path.join(ctx.archive, 'owner'), 'w') as f:
             f.write(ctx.owner + '\n')
 
+        with file(os.path.join(ctx.archive, 'orig.config.yaml'), 'w') as f:
+            yaml.safe_dump(ctx.config, f, default_flow_style=False)
+
     for task in ctx.config['tasks']:
         assert 'kernel' not in task, \
             'kernel installation shouldn be a base-level item, not part of the tasks list'
@@ -233,6 +236,13 @@ def schedule():
         default='master',
         help='which branch of teuthology to use',
         )
+    parser.add_argument(
+        '-s', '--show',
+        metavar='JOBID',
+        type=int,
+        nargs='*',
+        help='output the contents of specified jobs in the queue',
+        )
 
     ctx = parser.parse_args()
     if not ctx.last_in_suite:
@@ -251,6 +261,15 @@ def schedule():
     if ctx.branch != 'master':
         tube += '-' + ctx.branch
     beanstalk.use(tube)
+
+    if ctx.show:
+        for jobid in ctx.show:
+            job = beanstalk.peek(jobid)
+            if job is None and ctx.verbose:
+                print 'job {jid} is not in the queue'.format(jid=jobid)
+            else:
+                print 'job {jid} contains: '.format(jid=jobid), job.body
+        return
 
     if ctx.delete:
         for jobid in ctx.delete:

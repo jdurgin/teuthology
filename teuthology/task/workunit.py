@@ -76,7 +76,7 @@ def task(ctx, config):
             continue
         PREFIX = 'client.'
         assert role.startswith(PREFIX)
-        _make_scratch_dir(ctx, role)
+        _make_scratch_dir(ctx, role, config.get('subdir'))
     all_spec = False #is there an all grouping?
     with parallel() as p:
         for role, tests in clients.iteritems():
@@ -87,15 +87,16 @@ def task(ctx, config):
 
     if all_spec:
         all_tasks = clients["all"]
-        _spawn_on_all_clients(ctx, refspec, all_tasks, config.get('env'))
+        _spawn_on_all_clients(ctx, refspec, all_tasks, config.get('env'), config.get('subdir'))
 
-def _make_scratch_dir(ctx, role):
+def _make_scratch_dir(ctx, role, subdir):
     PREFIX = 'client.'
     id_ = role[len(PREFIX):]
     log.debug("getting remote for {id} role {role_}".format(id=id_, role_=role))
     (remote,) = ctx.cluster.only(role).remotes.iterkeys()
     dir_owner = remote.shortname.split('@', 1)[0]
     mnt = os.path.join('/tmp/cephtest', 'mnt.{id}'.format(id=id_))
+    if not subdir: subdir = 'client.{id}'.format(id=id_)
     remote.run(
         args=[
             # cd first so this will fail if the mount point does
@@ -109,26 +110,26 @@ def _make_scratch_dir(ctx, role):
             'install',
             '-d',
             '-m', '0755',
-            '--owner={user}'.format(user=dir_owner), 
+            '--owner={user}'.format(user=dir_owner),
             '--',
-            'client.{id}'.format(id=id_),
+            subdir,
             ],
         )
 
-def _spawn_on_all_clients(ctx, refspec, tests, env):
+def _spawn_on_all_clients(ctx, refspec, tests, env, subdir):
     client_generator = teuthology.all_roles_of_type(ctx.cluster, 'client')
     client_remotes = list()
     for client in client_generator:
         (client_remote,) = ctx.cluster.only('client.{id}'.format(id=client)).remotes.iterkeys()
         client_remotes.append((client_remote, 'client.{id}'.format(id=client)))
-        _make_scratch_dir(ctx, "client.{id}".format(id=client))
-        
+        _make_scratch_dir(ctx, "client.{id}".format(id=client), subdir)
+
     for unit in tests:
         with parallel() as p:
             for remote, role in client_remotes:
-                p.spawn(_run_tests, ctx, refspec, role, [unit], env)
+                p.spawn(_run_tests, ctx, refspec, role, [unit], env, subdir)
 
-def _run_tests(ctx, refspec, role, tests, env):
+def _run_tests(ctx, refspec, role, tests, env, subdir=None):
     assert isinstance(role, basestring)
     PREFIX = 'client.'
     assert role.startswith(PREFIX)
@@ -136,7 +137,10 @@ def _run_tests(ctx, refspec, role, tests, env):
     (remote,) = ctx.cluster.only(role).remotes.iterkeys()
     mnt = os.path.join('/tmp/cephtest', 'mnt.{id}'.format(id=id_))
     # subdir so we can remove and recreate this a lot without sudo
-    scratch_tmp = os.path.join(mnt, 'client.{id}'.format(id=id_), 'tmp')
+    if subdir is None:
+        scratch_tmp = os.path.join(mnt, 'client.{id}'.format(id=id_), 'tmp')
+    else:
+        scratch_tmp = os.path.join(mnt, subdir)
     srcdir = '/tmp/cephtest/workunit.{role}'.format(role=role)
     secretfile = '/tmp/cephtest/data/{role}.secret'.format(role=role)
     teuthology.write_secret_file(remote, role, secretfile)
@@ -187,7 +191,7 @@ def _run_tests(ctx, refspec, role, tests, env):
             for workunit in to_run:
                 log.info('Running workunit %s...', workunit)
                 args = [
-                    'mkdir', '--', scratch_tmp,
+                    'mkdir', '-p', '--', scratch_tmp,
                     run.Raw('&&'),
                     'cd', '--', scratch_tmp,
                     run.Raw('&&'),
@@ -212,14 +216,17 @@ def _run_tests(ctx, refspec, role, tests, env):
                             srcdir=srcdir,
                             workunit=workunit,
                             ),
-                        run.Raw('&&'),
-                        'rm', '-rf', '--', scratch_tmp,
                         ])
                 remote.run(
                     logger=log.getChild(role),
                     args=args,
                     )
+                remote.run(
+                    logger=log.getChild(role),
+                    args=['rm', '-rf', '--', scratch_tmp],
+                    )
     finally:
+        log.info('Stopping %s on %s...', spec, role)
         remote.run(
             logger=log.getChild(role),
             args=[

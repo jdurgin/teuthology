@@ -38,7 +38,7 @@ def task(ctx, config):
         - ceph:
         - ceph-fuse:
             client.0:
-              valgrind: --tool=memcheck
+              valgrind: [--tool=memcheck, --leak-check=full, --show-reachable=yes]
         - interactive:
 
     """
@@ -50,6 +50,9 @@ def task(ctx, config):
                   for id_ in teuthology.all_roles_of_type(ctx.cluster, 'client'))
     elif isinstance(config, list):
         config = dict((name, None) for name in config)
+
+    overrides = ctx.config.get('overrides', {})
+    teuthology.deep_merge(config, overrides.get('ceph-fuse', {}))
 
     clients = list(teuthology.get_clients(ctx=ctx, roles=config.keys()))
 
@@ -123,13 +126,36 @@ def task(ctx, config):
         log.info('Unmounting ceph-fuse clients...')
         for id_, remote in clients:
             mnt = os.path.join('/tmp/cephtest', 'mnt.{id}'.format(id=id_))
-            remote.run(
-                args=[
-                    'fusermount',
-                    '-u',
-                    mnt,
-                    ],
-                )
+            try:
+              remote.run(
+                  args=[
+                      'fusermount',
+                      '-u',
+                      mnt,
+                      ],
+                  )
+            except CommandFailedError as e:
+              log.info('Failed to unmount ceph-fuse on {name}, aborting...'.format(name=remote.name))
+              # abort the fuse mount, killing all hung processes
+              remote.run(
+                  args=[
+                      'echo',
+                      '1',
+                      run.Raw('>'),
+                      run.Raw('/sys/fs/fuse/connections/*/abort'),
+                      ],
+                 )
+              # make sure its unmounted
+              remote.run(
+                  args=[
+                      'sudo',
+                      'umount',
+                      '-l',
+                      '-f',
+                      mnt,
+                      ],
+                  )
+
         run.wait(fuse_daemons.itervalues())
 
         for id_, remote in clients:

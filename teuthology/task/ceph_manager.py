@@ -33,7 +33,7 @@ class Thrasher:
     def kill_osd(self, osd=None):
         if osd is None:
             osd = random.choice(self.live_osds)
-        self.log("Killing osd %s, live_osds are %s"%(str(osd),str(self.live_osds)))
+        self.log("Killing osd %s, live_osds are %s" % (str(osd),str(self.live_osds)))
         self.live_osds.remove(osd)
         self.dead_osds.append(osd)
         self.ceph_manager.kill_osd(osd)
@@ -41,7 +41,7 @@ class Thrasher:
     def blackhole_kill_osd(self, osd=None):
         if osd is None:
             osd = random.choice(self.live_osds)
-        self.log("Blackholing and then killing osd %s, live_osds are %s"%(str(osd),str(self.live_osds)))
+        self.log("Blackholing and then killing osd %s, live_osds are %s" % (str(osd),str(self.live_osds)))
         self.live_osds.remove(osd)
         self.dead_osds.append(osd)
         self.ceph_manager.blackhole_kill_osd(osd)
@@ -49,7 +49,7 @@ class Thrasher:
     def revive_osd(self, osd=None):
         if osd is None:
             osd = random.choice(self.dead_osds)
-        self.log("Reviving osd %s"%(str(osd),))
+        self.log("Reviving osd %s" % (str(osd),))
         self.live_osds.append(osd)
         self.dead_osds.remove(osd)
         self.ceph_manager.revive_osd(osd)
@@ -57,7 +57,7 @@ class Thrasher:
     def out_osd(self, osd=None):
         if osd is None:
             osd = random.choice(self.in_osds)
-        self.log("Removing osd %s, in_osds are: %s"%(str(osd),str(self.in_osds)))
+        self.log("Removing osd %s, in_osds are: %s" % (str(osd),str(self.in_osds)))
         self.ceph_manager.mark_out_osd(osd)
         self.in_osds.remove(osd)
         self.out_osds.append(osd)
@@ -67,7 +67,7 @@ class Thrasher:
             osd = random.choice(self.out_osds)
         if osd in self.dead_osds:
             return self.revive_osd(osd)
-        self.log("Adding osd %s"%(str(osd),))
+        self.log("Adding osd %s" % (str(osd),))
         self.out_osds.remove(osd)
         self.in_osds.append(osd)
         self.ceph_manager.mark_in_osd(osd)
@@ -82,8 +82,33 @@ class Thrasher:
         self.stopping = True
         self.thread.get()
 
+    def test_pool_min_size(self):
+        self.log("test_pool_min_size")
+        self.all_up()
+        self.ceph_manager.wait_for_recovery(
+            timeout=self.config.get('timeout')
+            )
+        the_one = random.choice(self.in_osds)
+        self.log("Killing everyone but %s", the_one)
+        to_kill = filter(lambda x: x != the_one, self.in_osds)
+        [self.kill_osd(i) for i in to_kill]
+        [self.out_osd(i) for i in to_kill]
+        time.sleep(self.config.get("test_pool_min_size_time", 10))
+        self.log("Killing %s" % (the_one,))
+        self.kill_osd(the_one)
+        self.out_osd(the_one)
+        self.log("Reviving everyone but %s" % (the_one,))
+        [self.revive_osd(i) for i in to_kill]
+        [self.in_osd(i) for i in to_kill]
+        self.log("Revived everyone but %s" % (the_one,))
+        self.log("Waiting for clean")
+        self.ceph_manager.wait_for_recovery(
+            timeout=self.config.get('timeout')
+            )
+
     def choose_action(self):
         chance_down = self.config.get("chance_down", 0)
+        chance_test_min_size = self.config.get("chance_test_min_size", 0)
         if isinstance(chance_down, int):
             chance_down = float(chance_down) / 100
         minin = self.config.get("min_in", 2)
@@ -102,6 +127,7 @@ class Thrasher:
             actions.append((self.in_osd, 1.7,))
         if len(self.dead_osds) > mindead:
             actions.append((self.revive_osd, 1.0,))
+        actions.append((self.test_pool_min_size, chance_test_min_size,))
 
         total = sum([y for (x,y) in actions])
         val = random.uniform(0, total)
@@ -158,6 +184,38 @@ class CephManager:
             stdout=StringIO(),
             )
         return proc.stdout.getvalue()
+
+    def get_pg_primary(self, pool, pgnum):
+        """
+        get primary for pool, pgnum (e.g. (data, 0)->0
+        """
+        poolnum = self.get_pool_num(pool)
+        output = self.raw_cluster_cmd("pg", "dump", '--format=json')
+        j = json.loads('\n'.join(output.split('\n')[1:]))
+        pg_str = "%d.%d" % (poolnum, pgnum)
+        for pg in j['pg_stats']:
+            if pg['pgid'] == pg_str:
+                return int(pg['acting'][0])
+        assert False
+
+    def get_pool_num(self, pool):
+        """
+        get number for pool (e.g., data -> 2)
+        """
+        out = self.raw_cluster_cmd('--', 'osd','dump','--format=json')
+        j = json.loads('\n'.join(out.split('\n')[1:]))
+        for i in j['pools']:
+            if i['pool_name'] == pool:
+                return int(i['pool'])
+        assert False
+
+    def set_config(self, osdnum, **argdict):
+        return self.raw_cluster_cmd(
+            'tell', "osd.%d" % (int(osdnum),),
+            'injectargs',
+            " ".join(
+                [("--" + conf.replace("_", "-") + " " + str(val)) for (conf,val) in 
+                 argdict.iteritems()]))
 
     def raw_cluster_status(self):
         return self.raw_cluster_cmd('-s')

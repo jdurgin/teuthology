@@ -35,3 +35,17 @@
 	fun:_dl_lookup_symbol_x
 	...
 }
+{
+	deliberate onexit leak
+	Memcheck:Leak
+	...
+	fun:*set_flush_on_exit*
+	...
+}
+{
+	libfuse leak
+	Memcheck:Leak
+	...
+	fun:fuse_parse_cmdline
+	...
+}
