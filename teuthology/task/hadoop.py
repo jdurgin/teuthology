@@ -23,14 +23,17 @@ log = logging.getLogger(__name__)
 @contextlib.contextmanager
 def validate_config(ctx, config):
     log.info('Vaidating Hadoop configuration')
-        slaves = ctx.cluster.only('hadoop-slave')
+    slaves = ctx.cluster.only('hadoop-slave')
 
-        for remote, roles_for_host in slaves.remotes.iteritems():
-            if (len(remote) < 1):
-                log.info("At least one hadoop-slave must be specified")
+    #for remote, roles_for_host in slaves.remotes.iteritems():
+    if (len(slaves.remotes) < 1):
+        log.info("At least one hadoop-slave must be specified")
+    else:
+        log.info(str(len(slaves.remotes)) + " slaves specified")
 
     try: 
         yield
+
     finally:
         pass
 
@@ -422,7 +425,7 @@ def task(ctx, config):
         "task hadoop only supports a dictionary for configuration"
 
     with contextutil.nested(
-        #lambda: validate_config(ctx=ctx, config=config),
+        lambda: validate_config(ctx=ctx, config=config),
         lambda: binaries(ctx=ctx, config=dict(
                 #branch=config.get('branch'),
                 branch=branch,
@@ -439,5 +442,5 @@ def task(ctx, config):
         lambda: load_data(ctx=ctx, config=config),
         lambda: run_wordcount(ctx=ctx, config=config),
         ):
-    yield
+        yield
 
