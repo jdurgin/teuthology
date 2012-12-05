@@ -18,8 +18,6 @@ def _exec_role(remote, role, sudo, ls):
     r = remote.run( args=args, stdin=tor.PIPE, wait=False)
     r.stdin.writelines(['set -e\n'])
     r.stdin.flush()
-    #r.stdin.writelines(['cd /tmp/cephtest/mnt.{cid}\n'.format(cid=cid)])
-    r.stdin.flush()
     for l in ls:
         r.stdin.writelines([l, '\n'])
         r.stdin.flush()
