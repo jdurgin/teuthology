@@ -53,7 +53,7 @@ def write_hadoop_env(ctx, config):
 
     tmpFile = StringIO()
     tmpFile.write('''
-export JAVA_HOME=/usr/lib/jvm/java-6-openjdk-amd64
+export JAVA_HOME=/usr/lib/jvm/default-java
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/tmp/cephtest/binary/usr/local/lib:/usr/lib
 export HADOOP_CLASSPATH=$HADOOP_CLASSPATH:/tmp/cephtest/binary/usr/local/lib/libcephfs.jar:/tmp/cephtest/hadoop/build/hadoop-core*.jar
 export HADOOP_NAMENODE_OPTS="-Dcom.sun.management.jmxremote $HADOOP_NAMENODE_OPTS"
@@ -70,38 +70,6 @@ export HADOOP_JOBTRACKER_OPTS="-Dcom.sun.management.jmxremote $HADOOP_JOBTRACKER
         tmpFile.seek(0)
         log.info("wrote file: " + hadoopEnvFile + " to host: " + str(remote))
 
-
-    #with open(hadoopEnvFile, "a") as fileToWrite:
-        #fileToWrite.write("export JAVA_HOME=/usr/lib/jvm/java-6-openjdk-amd64\n")
-        #fileToWrite.write("export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/tmp/cephtest/binary/usr/local/lib:/usr/lib\n")
-        #fileToWrite.write("export HADOOP_CLASSPATH=$HADOOP_CLASSPATH:/tmp/cephtest/binary/usr/local/lib/libcephfs.jar:/tmp/cephtest/hadoop/build/hadoop-core*.jar\n")
-
-    #push_file_to_all_hosts(ctx, hadoopEnvFile)
-
-## Copies a file to all hosts in the config
-## TODO: only push to hosts that serve at least one hadoop role
-#def push_file_to_all_hosts(ctx, fileToPush):
-#
-#    with open(fileToPush, "r") as fileToWrite:
-#        conf_fp = StringIO(fileToWrite.read())
-#
-#    conf_fp.seek(0)
-#
-#    # now push it to each host
-#    writes = ctx.cluster.run(
-#        args=[
-#            'python',
-#            '-c',
-#            'import shutil, sys; shutil.copyfileobj(sys.stdin, file(sys.argv[1], "wb"))',
-#            fileToPush,
-#            ],
-#        stdin=run.PIPE,
-#        wait=False,
-#        )
-#    teuthology.feed_many_stdins_and_close(conf_fp, writes)
-#    run.wait(writes)
-
-
 ## Add required entries to conf/core-site.xml
 def write_core_site(ctx, config):
     coreSiteFile = "/tmp/cephtest/hadoop/conf/core-site.xml" 
@@ -114,16 +82,16 @@ def write_core_site(ctx, config):
     <property>
         <name>hadoop.tmp.dir</name>
         <value>/tmp/hadoop/tmp</value>
-    </property>"
+    </property>
     <property>
         <name>fs.default.name</name>
     ''')
 
     ## sort out if Hadoop should run on HDFS or ceph
     if config.get('hdfs'):
-        tmpFile.write('\t\t<value>hdfs://{master_ip}:54310/</value>'.format(master_ip=get_hadoop_master_ip(ctx)))
+        tmpFile.write('\t<value>hdfs://{master_ip}:54310</value>'.format(master_ip=get_hadoop_master_ip(ctx)))
     else:
-        tmpFile.write("\t\t<value>ceph:///</value>")
+        tmpFile.write("\t<value>ceph:///</value>")
 
     tmpFile.write('''
     </property>
@@ -143,13 +111,9 @@ def write_core_site(ctx, config):
 
 ## finds the hadoop.master in the ctx and then pulls out just the IP address
 def get_hadoop_master_ip(ctx):
-    # figure out which IP is the master
-    master = ctx.cluster.only(teuthology.is_type('hadoop.master'))
-
-    assert 1 == len(master.remotes.items()), 'There must be exactly 1 hadoop.master configured'
-    for remote, roles_for_host in master.remotes.iteritems():
-        m = re.search('\w+@([\d\.]+)', str(remote))
-        return m.group(1)
+    remote, _ = _get_master(ctx)
+    m = re.search('[\w\d_]+@([\w\d\._]+)', str(remote))
+    return m.group(1)
 
 
 ## Add required entries to conf/mapred-site.xml
@@ -168,7 +132,7 @@ def write_mapred_site(ctx):
     master_ip = get_hadoop_master_ip(ctx)
 
     log.info('adding host {remote} as jobtracker'.format(remote=master_ip))
-    tmpFile.write('\t\t<value>{remote}:54311</value>'.format(remote=master_ip))
+    tmpFile.write('\t<value>{remote}:54311</value>'.format(remote=master_ip))
 
     tmpFile.write('''
     </property>
@@ -217,14 +181,12 @@ def write_slaves(ctx):
 
     slaves = ctx.cluster.only(teuthology.is_type('hadoop.slave'))
     for remote, roles_for_host in slaves.remotes.iteritems():
-        m = re.search('\w+@([\d\.]+)', str(remote))
+        m = re.search('[\w\d_]+@([\w\d\._]+)', str(remote))
         if m:
             log.info('adding host {remote} to slaves'.format(remote=m.group(1)))
             tmpFile.write('{remote}\n'.format(remote=m.group(1)))
         else:
             raise Exception('no IP or hostname address in {remote}'.format(remote=remote))
-
-        #push_file_to_all_hosts(ctx, slavesFile)
 
     tmpFile.seek(0)
 
@@ -239,15 +201,15 @@ def write_slaves(ctx):
 def write_master(ctx):
     mastersFile = "/tmp/cephtest/hadoop/conf/masters"
     tmpFile = StringIO()
-    master = ctx.cluster.only(teuthology.is_type('hadoop.master'))
+    master = _get_master(ctx)
+    remote, _ = master
 
-    for remote, roles_for_host in master.remotes.iteritems():
-        m = re.search('\w+@([\d\.]+)', str(remote))
-        if m:
-            log.info('adding host {remote} to master'.format(remote=m.group(1)))
-            tmpFile.write('{remote}\n'.format(remote=m.group(1)))
-        else:
-            raise Exception('no IP address in {remote}'.format(remote=remote))
+    m = re.search('[\w\d_]+@([\w\d\._]+)', str(remote))
+    if m:
+        log.info('adding host {remote} to master'.format(remote=m.group(1)))
+        tmpFile.write('{remote}\n'.format(remote=m.group(1)))
+    else:
+        raise Exception('no IP address in {remote}'.format(remote=remote))
 
     tmpFile.seek(0)
 
@@ -281,17 +243,12 @@ def configure_hadoop(ctx, config):
         log.info('hdfs option specified. Setting up hdfs')
 
         # let's run this from the master
-        master = ctx.cluster.only(teuthology.is_type('hadoop.master'))
-
-        assert 1 == len(master.remotes.items()), 'There must be exactly 1 hadoop.master configured'
-        for remote, roles_for_host in master.remotes.iteritems():
-            #run.wait(
-            remote.run(
-                args=["/tmp/cephtest/hadoop/bin/hadoop","namenode","-format"],
-                wait=True,
-                    #checkStatus=False,
-            #    )
-            )
+        master = _get_master(ctx)
+        remote, _ = master
+        remote.run(
+        args=["/tmp/cephtest/hadoop/bin/hadoop","namenode","-format"],
+            wait=True,
+        )
 
     log.info('done setting up hadoop')
 
@@ -310,21 +267,6 @@ def configure_hadoop(ctx, config):
                 wait=False,
                 ),
             )
-
-@contextlib.contextmanager
-def run_wordcount(ctx, config):
-    log.info('running wordcount')
-    for myJar in glob.glob("/tmp/cephtest/hadoop/build/hadoop-examples*.jar"):
-        subprocess.call(["/tmp/cephtest/hadoop/bin/hadoop", "jar",\
-        myJar, "wordcount", "wordcount_input", "wordcount_output"])
-
-    log.info('done running wordcount')
-
-    try: 
-        yield
-
-    finally:
-        log.info('no need to unload data.')
 
 def _start_hadoop(remote, config):
     if config.get('hdfs'):
@@ -355,19 +297,24 @@ def _stop_hadoop(remote, config):
 
     log.info('done stopping hadoop')
 
+def _get_master(ctx):
+    master = ctx.cluster.only(teuthology.is_type('hadoop.master'))
+    assert 1 == len(master.remotes.items()), 'There must be exactly 1 hadoop.master configured'
+
+    return master.remotes.items()[0]
+
 @contextlib.contextmanager
 def start_hadoop(ctx, config):
-    # Find the master server and run start / stop commands there
-    master = ctx.cluster.only(teuthology.is_type('hadoop.master'))
+    master = _get_master(ctx)
+    remote, _ = master
 
-    for remote, roles_for_host in master.remotes.iteritems():
-        #parse out the IP address from remote
-        m = re.search('\w+@([\d\.]+)', str(remote))
-        if m:
-            log.info('Starting hadoop on {remote}'.format(remote=m.group(1)))
-            _start_hadoop(remote, config)
-        else:
-            raise Exception('no IP address in {remote}, not a valid hadoop.master'.format(remote=remote))
+    #parse out the IP address from remote
+    m = re.search('[\w\d_]+@([\w\d\._]+)', str(remote))
+    if m:
+        log.info('Starting hadoop on {remote}'.format(remote=m.group(1)))
+        _start_hadoop(remote, config)
+    else:
+        raise Exception('no IP address in {remote}, not a valid hadoop.master'.format(remote=remote))
 
     try: 
         yield
@@ -425,7 +372,8 @@ def binaries(ctx, config):
                 f.write(sha1 + '\n')
 
     with parallel() as p:
-        for remote in ctx.cluster.remotes.iterkeys():
+        hadoopNodes = ctx.cluster.only(teuthology.is_type('hadoop'))
+        for remote in hadoopNodes.remotes.iterkeys():
             p.spawn(_download_hadoop_binaries, remote, hadoop_bindir_url)
 
     try:
@@ -452,14 +400,12 @@ def out_of_safemode(ctx, config):
     if config.get('hdfs'):
         log.info('Waiting for the Namenode to exit safe mode...')
 
-        master = ctx.cluster.only(teuthology.is_type('hadoop.master'))
-        for remote, roles_for_host in master.remotes.iteritems():
-            remote.run(
-                args=["/tmp/cephtest/hadoop/bin/hadoop","dfsadmin","-safemode", "wait"],
-                wait=True,
-                #checkStatus=False,
-            )
-
+        master = _get_master(ctx)
+        remote, _ = master
+        remote.run(
+            args=["/tmp/cephtest/hadoop/bin/hadoop","dfsadmin","-safemode", "wait"],
+            wait=True,
+        )
     else:
         pass
 
@@ -501,7 +447,7 @@ def task(ctx, config):
     and at least one hadoop.slave.
 
     This does *not* do anything with the Hadoop setup. To run wordcount, 
-    you could use pexec like so:
+    you could use pexec like so (after the hadoop task):
 
     - pexec: 
         hadoop.slave.0:
