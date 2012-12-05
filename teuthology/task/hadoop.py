@@ -478,7 +478,7 @@ def task(ctx, config):
     roles:
     - [mon.0, mds.0, osd.0, hadoop.master.0]
     - [mon.1, osd.1, hadoop.slave.0]
-    - [mon.2, hadoop.slave.1 ]
+    - [mon.2, hadoop.slave.1]
 
     tasks:
     - ceph:
