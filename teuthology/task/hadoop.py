@@ -111,13 +111,9 @@ def write_core_site(ctx, config):
 
 ## finds the hadoop.master in the ctx and then pulls out just the IP address
 def get_hadoop_master_ip(ctx):
-    # figure out which IP is the master
-    master = ctx.cluster.only(teuthology.is_type('hadoop.master'))
-
-    assert 1 == len(master.remotes.items()), 'There must be exactly 1 hadoop.master configured'
-    for remote, roles_for_host in master.remotes.iteritems():
-        m = re.search('[\w\d_]+@([\w\d\._]+)', str(remote))
-        return m.group(1)
+    remote, _ = _get_master(ctx)
+    m = re.search('[\w\d_]+@([\w\d\._]+)', str(remote))
+    return m.group(1)
 
 
 ## Add required entries to conf/mapred-site.xml
@@ -205,16 +201,15 @@ def write_slaves(ctx):
 def write_master(ctx):
     mastersFile = "/tmp/cephtest/hadoop/conf/masters"
     tmpFile = StringIO()
-    master = ctx.cluster.only(teuthology.is_type('hadoop.master'))
-    assert 1 == len(master.remotes.items()), 'There must be exactly 1 hadoop.master configured'
+    master = _get_master(ctx)
+    remote, _ = master
 
-    for remote, roles_for_host in master.remotes.iteritems():
-        m = re.search('[\w\d_]+@([\w\d\._]+)', str(remote))
-        if m:
-            log.info('adding host {remote} to master'.format(remote=m.group(1)))
-            tmpFile.write('{remote}\n'.format(remote=m.group(1)))
-        else:
-            raise Exception('no IP address in {remote}'.format(remote=remote))
+    m = re.search('[\w\d_]+@([\w\d\._]+)', str(remote))
+    if m:
+        log.info('adding host {remote} to master'.format(remote=m.group(1)))
+        tmpFile.write('{remote}\n'.format(remote=m.group(1)))
+    else:
+        raise Exception('no IP address in {remote}'.format(remote=remote))
 
     tmpFile.seek(0)
 
@@ -248,14 +243,12 @@ def configure_hadoop(ctx, config):
         log.info('hdfs option specified. Setting up hdfs')
 
         # let's run this from the master
-        master = ctx.cluster.only(teuthology.is_type('hadoop.master'))
-
-        assert 1 == len(master.remotes.items()), 'There must be exactly 1 hadoop.master configured'
-        for remote, roles_for_host in master.remotes.iteritems():
-            remote.run(
-                args=["/tmp/cephtest/hadoop/bin/hadoop","namenode","-format"],
-                wait=True,
-            )
+        master = _get_master(ctx)
+        remote, _ = master
+        remote.run(
+        args=["/tmp/cephtest/hadoop/bin/hadoop","namenode","-format"],
+            wait=True,
+        )
 
     log.info('done setting up hadoop')
 
@@ -304,20 +297,24 @@ def _stop_hadoop(remote, config):
 
     log.info('done stopping hadoop')
 
-@contextlib.contextmanager
-def start_hadoop(ctx, config):
-    # Find the master server and run start / stop commands there
+def _get_master(ctx):
     master = ctx.cluster.only(teuthology.is_type('hadoop.master'))
     assert 1 == len(master.remotes.items()), 'There must be exactly 1 hadoop.master configured'
 
-    for remote, roles_for_host in master.remotes.iteritems():
-        #parse out the IP address from remote
-        m = re.search('[\w\d_]+@([\w\d\._]+)', str(remote))
-        if m:
-            log.info('Starting hadoop on {remote}'.format(remote=m.group(1)))
-            _start_hadoop(remote, config)
-        else:
-            raise Exception('no IP address in {remote}, not a valid hadoop.master'.format(remote=remote))
+    return master.remotes.items()[0]
+
+@contextlib.contextmanager
+def start_hadoop(ctx, config):
+    master = _get_master(ctx)
+    remote, _ = master
+
+    #parse out the IP address from remote
+    m = re.search('[\w\d_]+@([\w\d\._]+)', str(remote))
+    if m:
+        log.info('Starting hadoop on {remote}'.format(remote=m.group(1)))
+        _start_hadoop(remote, config)
+    else:
+        raise Exception('no IP address in {remote}, not a valid hadoop.master'.format(remote=remote))
 
     try: 
         yield
@@ -403,15 +400,12 @@ def out_of_safemode(ctx, config):
     if config.get('hdfs'):
         log.info('Waiting for the Namenode to exit safe mode...')
 
-        master = ctx.cluster.only(teuthology.is_type('hadoop.master'))
-        assert 1 == len(master.remotes.items()), 'There must be exactly 1 hadoop.master configured'
-
-        for remote, roles_for_host in master.remotes.iteritems():
-            remote.run(
-                args=["/tmp/cephtest/hadoop/bin/hadoop","dfsadmin","-safemode", "wait"],
-                wait=True,
-                #checkStatus=False,
-            )
+        master = _get_master(ctx)
+        remote, _ = master
+        remote.run(
+            args=["/tmp/cephtest/hadoop/bin/hadoop","dfsadmin","-safemode", "wait"],
+            wait=True,
+        )
     else:
         pass
 
