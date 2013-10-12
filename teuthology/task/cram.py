@@ -12,10 +12,6 @@ def task(ctx, config):
     Run all cram tests from the specified urls on the specified
     clients. Each client runs tests in parallel.
 
-    Limitations:
-    Tests must have a .t suffix. Tests with duplicate names will
-    overwrite each other, so only the last one will run.
-
     For example::
 
         tasks:
@@ -57,12 +53,12 @@ def task(ctx, config):
                     'install', 'cram',
                     ],
                 )
-            for test in tests:
+            for i, test in enumerate(tests):
                 log.info('fetching test %s for %s', test, client)
-                assert test.endswith('.t'), 'tests must end in .t'
                 remote.run(
                     args=[
-                        'wget', '-nc', '-nv', '-P', client_dir, '--', test,
+                        'wget', '-nc', '-nv', '-P', client_dir,
+                        '-O', '%d.t' % i, '--', test,
                         ],
                     )
 
